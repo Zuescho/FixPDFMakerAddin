@@ -1,5 +1,5 @@
 # Create a directory for the logs if it doesn't already exist
-Set-LocationogDir = "C:\Windows\Logs\FixPDFMakerAddin"
+$logDir = "C:\Windows\Logs\FixPDFMakerAddin"
 if (-not (Test-Path -Path $logDir)) {
     New-Item -Path $logDir -ItemType Directory -Force
 }
@@ -7,19 +7,35 @@ if (-not (Test-Path -Path $logDir)) {
 # Start logging
 Start-Transcript -Path "$logDir\FixPDFMakerAddin_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
 
-# Define the path to the PDFMaker directory
-$pdfMakerPath = "c:\Program Files\Adobe\Acrobat DC\PDFMaker"
+# --- Start of Modifications ---
 
-# Check if the PDFMaker directory exists
-if (-not (Test-Path -Path $pdfMakerPath)) {
-    Write-Host "The Adobe PDFMaker directory was not found. Skipping the rest of the script."
+# Define the possible paths to the PDFMaker directory
+$possiblePaths = @(
+    "c:\Program Files\Adobe\Acrobat DC\PDFMaker",
+    "c:\Program Files (x86)\Adobe\Acrobat 2020\PDFMaker"
+)
+
+$pdfMakerPath = $null
+
+# Check which PDFMaker directory exists
+foreach ($path in $possiblePaths) {
+    if (Test-Path -Path $path) {
+        $pdfMakerPath = $path
+        Write-Host "Found Adobe PDFMaker directory at: $pdfMakerPath"
+        break
+    }
+}
+
+# If no path was found, exit the script
+if ($null -eq $pdfMakerPath) {
+    Write-Host "No Adobe PDFMaker directory was found in the specified locations. Skipping the rest of the script."
     Stop-Transcript
     Exit 0
 }
 
-Write-Host "Adobe PDFMaker directory found. Proceeding with script..."
+# --- End of Modifications ---
 
-# --- Start of Modifications ---
+Write-Host "Proceeding with script..."
 
 # Close all Microsoft Office applications
 $officeApps = @("winword", "excel", "powerpnt", "outlook")
@@ -35,10 +51,8 @@ foreach ($app in $officeApps) {
 }
 Write-Host "All running Office applications have been closed."
 
-# --- End of Modifications ---
-
-# Change to relevant directory
-Set-Location $pdfMakerPath
+# Change to relevant directory using the full command
+Set-Location -Path $pdfMakerPath
 
 ### OFFICE SUBFOLDER
 # Fix any broken permissions
@@ -70,13 +84,13 @@ if ((Get-Item $path).PSIsContainer) {
 
 # Now add SYSTEM as only user that can read/write
 $ACL = Get-ACL -Path "Office"
-$AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM","FullControl","ContainerInherit,ObjectInherit","None","Allow")
+$AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
 $ACL.SetAccessRule($AccessRule)
 $ACL | Set-Acl -Path "Office"
 
 # Remove all permissions and inheritance from folder
 $ACL = Get-Acl -Path "Office"
-$ACL.SetAccessRuleProtection($true,$false)
+$ACL.SetAccessRuleProtection($true, $false)
 $ACL | Set-Acl -Path "Office"
 
 ### MAIL SUBFOLDER
@@ -109,13 +123,13 @@ if ((Get-Item $path).PSIsContainer) {
 
 # Now add SYSTEM as only user that can read/write
 $ACL = Get-ACL -Path "Mail"
-$AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM","FullControl","ContainerInherit,ObjectInherit","None","Allow")
+$AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
 $ACL.SetAccessRule($AccessRule)
 $ACL | Set-Acl -Path "Mail"
 
 # Remove all permissions and inheritance from folder
 $ACL = Get-Acl -Path "Mail"
-$ACL.SetAccessRuleProtection($true,$false)
+$ACL.SetAccessRuleProtection($true, $false)
 $ACL | Set-Acl -Path "Mail"
 
 Write-Host "ok"
