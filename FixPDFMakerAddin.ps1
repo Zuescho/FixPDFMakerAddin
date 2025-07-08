@@ -1,13 +1,13 @@
-# Verzeichnis für die Protokolle erstellen, falls es nicht existiert
+# Create a directory for the logs if it doesn't already exist
 $logDir = "C:\Windows\Logs\FixPDFMakerAddin"
 if (-not (Test-Path -Path $logDir)) {
     New-Item -Path $logDir -ItemType Directory -Force
 }
 
-# Protokollierung starten
+# Start logging
 Start-Transcript -Path "$logDir\FixPDFMakerAddin_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
 
-# Mögliche Pfade zum PDFMaker-Verzeichnis definieren
+# Define the possible paths to the PDFMaker directory
 $possiblePaths = @(
     "c:\Program Files\Adobe\Acrobat DC\PDFMaker",
     "c:\Program Files (x86)\Adobe\Acrobat 2020\PDFMaker"
@@ -15,81 +15,81 @@ $possiblePaths = @(
 
 $pdfMakerPath = $null
 
-# Prüfen, welches PDFMaker-Verzeichnis existiert
+# Check which PDFMaker directory exists
 foreach ($path in $possiblePaths) {
     if (Test-Path -Path $path) {
         $pdfMakerPath = $path
-        Write-Host "PDFMaker-Verzeichnis gefunden unter: $pdfMakerPath"
+        Write-Host "Found PDFMaker directory at: $pdfMakerPath"
         break
     }
 }
 
-# Wenn kein Pfad gefunden wurde, Skript beenden
+# If no path was found, exit the script
 if ($null -eq $pdfMakerPath) {
-    Write-Host "Kein PDFMaker-Verzeichnis an den angegebenen Orten gefunden. Skript wird übersprungen."
+    Write-Host "No PDFMaker directory was found in the specified locations. Skipping the rest of the script."
     Stop-Transcript
     Exit 0
 }
 
-Write-Host "Fahre mit dem Skript fort..."
+Write-Host "Proceeding with script..."
 
-# Alle Microsoft Office-Anwendungen schließen
+# Close all Microsoft Office applications
 $officeApps = @("winword", "excel", "powerpnt", "outlook")
-Write-Host "Prüfe auf laufende Office-Anwendungen..."
+Write-Host "Checking for running Office applications..."
 foreach ($app in $officeApps) {
     $processes = Get-Process -Name $app -ErrorAction SilentlyContinue
     if ($processes) {
-        Write-Host "Schließe $app..."
+        Write-Host "Closing $app..."
         Stop-Process -Name $app -Force
     } else {
-        Write-Host "$app wird nicht ausgeführt."
+        Write-Host "$app is not running."
     }
 }
-Write-Host "Alle laufenden Office-Anwendungen wurden geschlossen."
+Write-Host "All running Office applications have been closed."
 
-# Zum relevanten Verzeichnis wechseln
+# Change to the relevant directory
 Set-Location -Path $pdfMakerPath
 
-# Definiere die sprachunabhängige SID für "SYSTEM"
+# Define the language-independent SID for the "SYSTEM" account
 $systemSID = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
 
-### --- ANPASSUNGEN START ---
+# --- SCRIPT LOGIC START ---
 
-# Funktion zur Verarbeitung der Ordnerberechtigungen
+# Function to process the folder permissions
 function Set-FolderPermissions {
     param (
         [string]$FolderName
     )
 
-    Write-Host "Verarbeite Ordner: $FolderName"
+    Write-Host "Processing folder: $FolderName"
     
-    # 1. Besitz mit takeown.exe erzwingen (für Administratoren)
-    Write-Host "Übernehme Besitz von $FolderName..."
-    takeown.exe /F $FolderName /R /A /D J
+    # 1. Force ownership with takeown.exe (for the Administrators group)
+    Write-Host "Taking ownership of $FolderName..."
+    takeown.exe /F $FolderName /R /A /D Y
     
-    # 2. Berechtigungen mit icacls zurücksetzen
-    Write-Host "Setze Berechtigungen für $FolderName zurück..."
+    # 2. Reset permissions with icacls to a clean, inherited state
+    Write-Host "Resetting permissions for $FolderName..."
     icacls.exe $FolderName /t /q /c /reset
     
-    # 3. Alle Berechtigungen außer für SYSTEM entfernen
+    # 3. Remove all old rules and apply the new, final permissions
     $acl = Get-Acl -Path $FolderName
-    # Vererbung deaktivieren und vorhandene Regeln entfernen
+    # Disable inheritance and remove existing rules
     $acl.SetAccessRuleProtection($true, $false) 
-    # Neue Regel nur für SYSTEM hinzufügen
+    # Add the new rule for SYSTEM only
     $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($systemSID, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
     $acl.SetAccessRule($accessRule)
     
-    # Bereinigte ACL anwenden
+    # Apply the cleaned-up Access Control List (ACL)
     Set-Acl -Path $FolderName -AclObject $acl
-    Write-Host "Berechtigungen für $FolderName erfolgreich gesetzt."
+    Write-Host "Permissions for $FolderName have been set successfully."
 }
 
-# Verarbeite beide Ordner
+# Process both target folders
 Set-FolderPermissions -FolderName "Office"
 Set-FolderPermissions -FolderName "Mail"
 
-### --- ANPASSUNGEN ENDE ---
+# --- SCRIPT LOGIC END ---
 
-Write-Host "Skript erfolgreich abgeschlossen."
+Write-Host "Script completed successfully."
 Stop-Transcript
 Exit 0
