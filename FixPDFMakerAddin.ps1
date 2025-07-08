@@ -1,5 +1,5 @@
 # Create a directory for the logs if it doesn't already exist
-$logDir = "C:\Windows\Logs\FixPDFMakerAddin"
+Set-LocationogDir = "C:\Windows\Logs\FixPDFMakerAddin"
 if (-not (Test-Path -Path $logDir)) {
     New-Item -Path $logDir -ItemType Directory -Force
 }
