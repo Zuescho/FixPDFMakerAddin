@@ -1,15 +1,13 @@
-# Create a directory for the logs if it doesn't already exist
+# Verzeichnis für die Protokolle erstellen, falls es nicht existiert
 $logDir = "C:\Windows\Logs\FixPDFMakerAddin"
 if (-not (Test-Path -Path $logDir)) {
     New-Item -Path $logDir -ItemType Directory -Force
 }
 
-# Start logging
+# Protokollierung starten
 Start-Transcript -Path "$logDir\FixPDFMakerAddin_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
 
-# --- Start of Modifications ---
-
-# Define the possible paths to the PDFMaker directory
+# Mögliche Pfade zum PDFMaker-Verzeichnis definieren
 $possiblePaths = @(
     "c:\Program Files\Adobe\Acrobat DC\PDFMaker",
     "c:\Program Files (x86)\Adobe\Acrobat 2020\PDFMaker"
@@ -17,121 +15,81 @@ $possiblePaths = @(
 
 $pdfMakerPath = $null
 
-# Check which PDFMaker directory exists
+# Prüfen, welches PDFMaker-Verzeichnis existiert
 foreach ($path in $possiblePaths) {
     if (Test-Path -Path $path) {
         $pdfMakerPath = $path
-        Write-Host "Found Adobe PDFMaker directory at: $pdfMakerPath"
+        Write-Host "PDFMaker-Verzeichnis gefunden unter: $pdfMakerPath"
         break
     }
 }
 
-# If no path was found, exit the script
+# Wenn kein Pfad gefunden wurde, Skript beenden
 if ($null -eq $pdfMakerPath) {
-    Write-Host "No Adobe PDFMaker directory was found in the specified locations. Skipping the rest of the script."
+    Write-Host "Kein PDFMaker-Verzeichnis an den angegebenen Orten gefunden. Skript wird übersprungen."
     Stop-Transcript
     Exit 0
 }
 
-# --- End of Modifications ---
+Write-Host "Fahre mit dem Skript fort..."
 
-Write-Host "Proceeding with script..."
-
-# Close all Microsoft Office applications
+# Alle Microsoft Office-Anwendungen schließen
 $officeApps = @("winword", "excel", "powerpnt", "outlook")
-Write-Host "Checking for running Office applications..."
+Write-Host "Prüfe auf laufende Office-Anwendungen..."
 foreach ($app in $officeApps) {
     $processes = Get-Process -Name $app -ErrorAction SilentlyContinue
     if ($processes) {
-        Write-Host "Closing $app..."
+        Write-Host "Schließe $app..."
         Stop-Process -Name $app -Force
     } else {
-        Write-Host "$app is not running."
+        Write-Host "$app wird nicht ausgeführt."
     }
 }
-Write-Host "All running Office applications have been closed."
+Write-Host "Alle laufenden Office-Anwendungen wurden geschlossen."
 
-# Change to relevant directory using the full command
+# Zum relevanten Verzeichnis wechseln
 Set-Location -Path $pdfMakerPath
 
-### OFFICE SUBFOLDER
-# Fix any broken permissions
-icacls Office /t /q /c /reset
+# Definiere die sprachunabhängige SID für "SYSTEM"
+$systemSID = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
 
-# Recursively change owner first before we remove all permissions
-$path = "Office"
-$owner = "Administrators"
+### --- ANPASSUNGEN START ---
 
-# Get ACL and set the owner for the current item
-$ACL = Get-Acl -Path $path
-$User = New-Object System.Security.Principal.Ntaccount($owner)
-$ACL.SetOwner($User)
-Set-Acl -Path $path -AclObject $ACL
+# Funktion zur Verarbeitung der Ordnerberechtigungen
+function Set-FolderPermissions {
+    param (
+        [string]$FolderName
+    )
 
-# If the item is a directory, recurse into its contents
-if ((Get-Item $path).PSIsContainer) {
-    Get-ChildItem -Path $path -Recurse | ForEach-Object {
-        try {
-            # Apply ownership to each item
-            $itemACL = Get-Acl -Path $_.FullName
-            $itemACL.SetOwner($User)
-            Set-Acl -Path $_.FullName -AclObject $itemACL
-        } catch {
-            Write-Host "Failed to set owner on $_.FullName: $_" -ForegroundColor Red
-        }
-    }
+    Write-Host "Verarbeite Ordner: $FolderName"
+    
+    # 1. Besitz mit takeown.exe erzwingen (für Administratoren)
+    Write-Host "Übernehme Besitz von $FolderName..."
+    takeown.exe /F $FolderName /R /A /D J
+    
+    # 2. Berechtigungen mit icacls zurücksetzen
+    Write-Host "Setze Berechtigungen für $FolderName zurück..."
+    icacls.exe $FolderName /t /q /c /reset
+    
+    # 3. Alle Berechtigungen außer für SYSTEM entfernen
+    $acl = Get-Acl -Path $FolderName
+    # Vererbung deaktivieren und vorhandene Regeln entfernen
+    $acl.SetAccessRuleProtection($true, $false) 
+    # Neue Regel nur für SYSTEM hinzufügen
+    $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule($systemSID, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+    $acl.SetAccessRule($accessRule)
+    
+    # Bereinigte ACL anwenden
+    Set-Acl -Path $FolderName -AclObject $acl
+    Write-Host "Berechtigungen für $FolderName erfolgreich gesetzt."
 }
 
-# Now add SYSTEM as only user that can read/write
-$ACL = Get-ACL -Path "Office"
-$AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-$ACL.SetAccessRule($AccessRule)
-$ACL | Set-Acl -Path "Office"
+# Verarbeite beide Ordner
+Set-FolderPermissions -FolderName "Office"
+Set-FolderPermissions -FolderName "Mail"
 
-# Remove all permissions and inheritance from folder
-$ACL = Get-Acl -Path "Office"
-$ACL.SetAccessRuleProtection($true, $false)
-$ACL | Set-Acl -Path "Office"
+### --- ANPASSUNGEN ENDE ---
 
-### MAIL SUBFOLDER
-# Fix any broken permissions
-icacls Mail /t /q /c /reset
-
-# Recursively change owner first before we remove all permissions
-$path = "Mail"
-$owner = "Administrators"
-
-# Get ACL and set the owner for the current item
-$ACL = Get-Acl -Path $path
-$User = New-Object System.Security.Principal.Ntaccount($owner)
-$ACL.SetOwner($User)
-Set-Acl -Path $path -AclObject $ACL
-
-# If the item is a directory, recurse into its contents
-if ((Get-Item $path).PSIsContainer) {
-    Get-ChildItem -Path $path -Recurse | ForEach-Object {
-        try {
-            # Apply ownership to each item
-            $itemACL = Get-Acl -Path $_.FullName
-            $itemACL.SetOwner($User)
-            Set-Acl -Path $_.FullName -AclObject $itemACL
-        } catch {
-            Write-Host "Failed to set owner on $_.FullName: $_" -ForegroundColor Red
-        }
-    }
-}
-
-# Now add SYSTEM as only user that can read/write
-$ACL = Get-ACL -Path "Mail"
-$AccessRule = New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-$ACL.SetAccessRule($AccessRule)
-$ACL | Set-Acl -Path "Mail"
-
-# Remove all permissions and inheritance from folder
-$ACL = Get-Acl -Path "Mail"
-$ACL.SetAccessRuleProtection($true, $false)
-$ACL | Set-Acl -Path "Mail"
-
-Write-Host "ok"
+Write-Host "Skript erfolgreich abgeschlossen."
 Stop-Transcript
 Exit 0
